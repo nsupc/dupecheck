@@ -117,6 +117,8 @@ async fn main() {
 
     if let Err(e) = fs::write("output.txt", &output) {
         println!("Error writing output to file: {}.\n Writing to terminal instead.\n\n{}", e, &output);
+    } else {
+        println!("Output written to output.txt");
     }
 
 }
