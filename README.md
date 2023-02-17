@@ -7,6 +7,5 @@ A script to identify duplicate cards in a deck of [NationStates](https://www.nat
 5. Your duplicates will be written to "output.txt" when the program finishes
 ## Running via CLI or a Batch/Shell Script
 - You can set your User-Agent (-u) and target nation (-n) via CLI arguments.
-- You can use this to automate your logins via tools such as Windows Task Scheduler or Linux's cron
 - A basic batch script would look like this ``dupecheck -u UPC -n "The United Peoples of Centrism"``
 - Run "dupecheck -h" for more information
