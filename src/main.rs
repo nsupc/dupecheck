@@ -3,39 +3,36 @@ use serde::Deserialize;
 use serde_xml_rs::from_str;
 use std::collections::HashMap;
 use std::io;
-use std::fs;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name="dupecheck")]
+#[structopt(name = "dupecheck")]
 struct Opt {
     /// your main nation or ns email address
-    #[structopt(name="user", short, long)]
+    #[structopt(name = "user", short, long)]
     user_agent: Option<String>,
     /// the nation that you would like to check for duplicates
     #[structopt(short, long)]
     nation: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq)]
 struct Cards {
-    #[serde(rename="DECK")]
+    #[serde(rename = "DECK")]
     deck: Deck,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq)]
 struct Deck {
-    #[serde(rename="CARD")]
-    cards: Vec<Card>,
+    #[serde(rename = "CARD")]
+    cards: Option<Vec<Card>>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
 struct Card {
-    #[serde(rename="CARDID")]
+    #[serde(rename = "CARDID")]
     id: u32,
-    //#[serde(rename="CATEGORY")]
-    //category: String,
-    #[serde(rename="SEASON")]
+    #[serde(rename = "SEASON")]
     season: u8,
 }
 
@@ -61,7 +58,10 @@ fn get_input(itype: &str) -> String {
 
 async fn request(client: &Client, user: &str, nation: &str) -> Result<String, reqwest::Error> {
     let res = client
-        .get(format!("https://www.nationstates.net/cgi-bin/api.cgi?q=cards+deck;nationname={}", nation))
+        .get(format!(
+            "https://www.nationstates.net/cgi-bin/api.cgi?q=cards+deck;nationname={}",
+            nation
+        ))
         .header("User-Agent", format!("UPC's dupecheck, used by {}", user))
         .send()
         .await?
@@ -73,53 +73,158 @@ async fn request(client: &Client, user: &str, nation: &str) -> Result<String, re
 
 #[tokio::main]
 async fn main() {
-    let mut opt = Opt::from_args();
+    let opt = Opt::from_args();
 
-    if opt.user_agent.is_none() {
-        opt.user_agent = Some(get_input("main nation"));
-    }
+    let user_agent = match &opt.user_agent {
+        Some(val) => val.to_string(),
+        None => get_input("main nation"),
+    };
 
-    if opt.nation.is_none() {
-        opt.nation = Some(get_input("target nation"));
-    }
+    let target = match &opt.nation {
+        Some(val) => val.to_string(),
+        None => get_input("target nation"),
+    };
 
     let client = Client::new();
 
-    let deck_response = request(&client, &opt.user_agent.unwrap(), &opt.nation.unwrap()).await;
+    let deck_response = request(&client, &user_agent, &target).await;
 
     let cards: Cards = match deck_response {
-        Ok(val) => from_str(&val).unwrap(),
+        Ok(val) => match from_str(&val) {
+            Ok(val) => val,
+            Err(e) => {
+                println!("{:?}", e);
+                return;
+            }
+        },
         Err(e) => {
             println!("{:?}", e);
-            return
+            return;
         }
     };
 
-    let mut deck: HashMap<String, u32> = HashMap::new();
+    let mut card_count: HashMap<String, u32> = HashMap::new();
 
-    for card in cards.deck.cards {
-        let url = format!("https://www.nationstates.net/page=deck/card={}/season={}", card.id, card.season);
+    if let Some(deck) = cards.deck.cards {
+        for card in deck {
+            let url = format!(
+                "https://www.nationstates.net/page=deck/card={}/season={}",
+                card.id, card.season
+            );
 
-        if deck.contains_key(&url) {
-            deck.insert(url.clone(), deck[&url] + 1);
-        } else {
-            deck.insert(url.clone(), 1);
+            card_count
+                .entry(url)
+                .and_modify(|val| *val += 1)
+                .or_insert(1);
         }
-    }
-
-    let mut output = String::new();
-
-    for (k, v) in deck.iter() {
-        if *v != 1 {
-            output.push_str(format!("{}: {}\n", k, v).as_str());
-        }
-    }
-
-    if let Err(e) = fs::write("output.txt", &output) {
-        println!("Error writing output to file: {}.\n Writing to terminal instead.\n\n{}", e, &output);
     } else {
-        println!("Output written to output.txt");
+        println!("No cards found for {}", target);
+        return;
     }
 
+    let mut output: Vec<(String, u32)> = card_count
+        .iter()
+        .filter(|(_card, num)| **num > 1)
+        .map(|(card, num)| (card.to_owned(), num.to_owned()))
+        .collect();
+
+    output.sort_by(|a, b| b.1.cmp(&a.1));
+
+    for (card, count) in output {
+        println!("{}: {}", card, count);
+    }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_deck() {
+        let test_xml = r#"
+            <CARDS>
+            <DECK>
+            <CARD>
+            <CARDID>2213620</CARDID>
+            <CATEGORY>uncommon</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            <CARD>
+            <CARDID>1723611</CARDID>
+            <CATEGORY>common</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            <CARD>
+            <CARDID>410</CARDID>
+            <CATEGORY>legendary</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            <CARD>
+            <CARDID>57712</CARDID>
+            <CATEGORY>legendary</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            <CARD>
+            <CARDID>1059603</CARDID>
+            <CATEGORY>rare</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            <CARD>
+            <CARDID>1528716</CARDID>
+            <CATEGORY>uncommon</CATEGORY>
+            <SEASON>1</SEASON>
+            </CARD>
+            </DECK>
+            </CARDS>
+            "#;
+
+        let parsed: Cards = from_str(test_xml).unwrap();
+
+        let expected = Cards {
+            deck: Deck {
+                cards: Some(vec![
+                    Card {
+                        id: 2213620,
+                        season: 1,
+                    },
+                    Card {
+                        id: 1723611,
+                        season: 1,
+                    },
+                    Card { id: 410, season: 1 },
+                    Card {
+                        id: 57712,
+                        season: 1,
+                    },
+                    Card {
+                        id: 1059603,
+                        season: 1,
+                    },
+                    Card {
+                        id: 1528716,
+                        season: 1,
+                    },
+                ]),
+            },
+        };
+
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn desearialize_empty_deck() {
+        let test_xml = r#"
+            <CARDS>
+            <DECK/>
+            </CARDS>
+            "#;
+
+        let parsed: Cards = from_str(test_xml).unwrap();
+
+        let expected = Cards {
+            deck: Deck { cards: None },
+        };
+
+        assert_eq!(parsed, expected);
+    }
+}
