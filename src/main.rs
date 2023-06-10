@@ -2,7 +2,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_xml_rs::from_str;
 use std::collections::HashMap;
-use std::io;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -10,10 +9,10 @@ use structopt::StructOpt;
 struct Opt {
     /// your main nation or ns email address
     #[structopt(name = "user", short, long)]
-    user_agent: Option<String>,
+    user_agent: String,
     /// the nation that you would like to check for duplicates
     #[structopt(short, long)]
-    nation: Option<String>,
+    nation: String,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
@@ -36,26 +35,6 @@ struct Card {
     season: u8,
 }
 
-fn get_input(itype: &str) -> String {
-    let mut buffer = String::new();
-
-    let mut valid_input = false;
-
-    while !valid_input {
-        println!("Please enter your {}:", itype);
-
-        if let Ok(_val) = io::stdin().read_line(&mut buffer) {
-            buffer = buffer.trim().to_owned();
-
-            if !buffer.is_empty() {
-                valid_input = true;
-            }
-        }
-    }
-
-    buffer
-}
-
 async fn request(client: &Client, user: &str, nation: &str) -> Result<String, reqwest::Error> {
     let res = client
         .get(format!(
@@ -75,30 +54,20 @@ async fn request(client: &Client, user: &str, nation: &str) -> Result<String, re
 async fn main() {
     let opt = Opt::from_args();
 
-    let user_agent = match &opt.user_agent {
-        Some(val) => val.to_string(),
-        None => get_input("main nation"),
-    };
-
-    let target = match &opt.nation {
-        Some(val) => val.to_string(),
-        None => get_input("target nation"),
-    };
-
     let client = Client::new();
 
-    let deck_response = request(&client, &user_agent, &target).await;
+    let deck_response = request(&client, &opt.user_agent, &opt.nation).await;
 
     let cards: Cards = match deck_response {
         Ok(val) => match from_str(&val) {
             Ok(val) => val,
             Err(e) => {
-                println!("{:?}", e);
+                eprintln!("{:?}", e);
                 return;
             }
         },
         Err(e) => {
-            println!("{:?}", e);
+            eprintln!("{:?}", e);
             return;
         }
     };
@@ -118,7 +87,7 @@ async fn main() {
                 .or_insert(1);
         }
     } else {
-        println!("No cards found for {}", target);
+        eprintln!("No cards found for {}", &opt.nation);
         return;
     }
 
